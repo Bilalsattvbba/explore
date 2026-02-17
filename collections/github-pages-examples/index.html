@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+<meta charset="UTF-8">
+<title>لوحة تحكم الأدمن</title>
+<style>
+body { font-family: Arial, sans-serif; background:#f0f4f8; margin:0; padding:0;}
+.container { width:95%; max-width:1000px; margin:20px auto; background:#fff; border-radius:15px; padding:20px; box-shadow:0 10px 25px rgba(0,0,0,0.1);}
+h2 { text-align:center; color:#333; }
+input, button { width:90%; padding:10px; margin:5px auto; display:block; border-radius:8px; border:1px solid #ccc; font-size:15px;}
+button { background:#4CAF50; color:#fff; cursor:pointer; transition:0.3s;}
+button:hover { background:#45a049;}
+table { width:100%; border-collapse: collapse; margin-top:20px;}
+table, th, td { border:1px solid #ddd; }
+th, td { padding:12px; text-align:center;}
+th { background:#f7f7f7;}
+.status-active { color:green; font-weight:bold;}
+.status-expired { color:red; font-weight:bold;}
+#panel { display:none;}
+.video-list { text-align:left; }
+.video-list a { display:block; color:blue; text-decoration:underline; margin:2px 0;}
+</style>
+</head>
+<body>
+
+<div class="container">
+  <h2>تسجيل دخول الأدمن</h2>
+  <input type="email" id="adminEmail" value="admin2@test.com" placeholder="البريد الإلكتروني">
+  <div style="position: relative; width:90%; margin:auto;">
+    <input type="password" id="adminPass" value="Aa123456" placeholder="كلمة المرور" style="width:100%; padding-right:40px;">
+    <button type="button" id="togglePass" style="position:absolute; right:5px; top:5px; padding:5px 10px; cursor:pointer;">👁️</button>
+  </div>
+  <button id="loginBtn">دخول</button>
+
+  <div id="panel">
+    <h2>إدارة الاشتراكات والفيديوهات</h2>
+    <input type="text" id="uid" placeholder="UID المستخدم">
+    <input type="number" id="days" placeholder="عدد الأيام">
+    <button id="activateBtn">تفعيل الاشتراك</button>
+
+    <h3>قائمة المستخدمين</h3>
+    <table id="usersTable">
+      <thead>
+        <tr>
+          <th>UID</th>
+          <th>تاريخ الانتهاء</th>
+          <th>الأيام المتبقية</th>
+          <th>الحالة</th>
+          <th>تحكم الاشتراك</th>
+          <th>الفيديوهات التعليمية</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+import { getAuth, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+import { getFirestore, doc, setDoc, collection, getDocs, updateDoc, arrayUnion, arrayRemove } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+// 🔹 إعداد Firebase
+const firebaseConfig = {
+  apiKey: "AIzaSyBAowZqnYkoGtdCySoAK-V1_sthV3LxHOc",
+  authDomain: "billel-sat-panel.firebaseapp.com",
+  projectId: "billel-sat-panel",
+  storageBucket: "billel-sat-panel.firebasestorage.app",
+  messagingSenderId: "1058390756170",
+  appId: "1:1058390756170:web:cbe90492615576177b8fb3"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+// 🔹 إظهار/إخفاء كلمة المرور
+const togglePassBtn = document.getElementById('togglePass');
+const passInput = document.getElementById('adminPass');
+togglePassBtn.addEventListener('click', () => {
+  if(passInput.type==="password"){ passInput.type="text"; togglePassBtn.textContent="🙈"; }
+  else{ passInput.type="password"; togglePassBtn.textContent="👁️"; }
+});
+
+// 🔹 تسجيل دخول الأدمن (UID محدد)
+document.getElementById('loginBtn').addEventListener('click', async ()=>{
+  const email = document.getElementById('adminEmail').value.trim();
+  const pass = document.getElementById('adminPass').value.trim();
+  if(!email || !pass) return alert("أدخل البريد وكلمة المرور");
+  try{
+    const userCredential = await signInWithEmailAndPassword(auth,email,pass);
+    const uid = userCredential.user.uid;
+    
+    // ✅ UID الأدمن المحدد
+    if(uid !== "szsotNf8VIU0cnHOF1wFGiPina32"){
+      alert("ليس لديك صلاحية دخول");
+      return;
+    }
+
+    document.getElementById('panel').style.display="block";
+    loadUsers();
+  }catch(e){ alert("خطأ في تسجيل الدخول: "+e.message); }
+});
+
+// 🔹 تفعيل الاشتراك
+document.getElementById('activateBtn').addEventListener('click', async ()=>{
+  const uid = document.getElementById('uid').value.trim();
+  const days = parseInt(document.getElementById('days').value);
+  if(!uid || !days) return alert("أدخل UID وعدد الأيام");
+  const now = new Date();
+  const expires = new Date(); expires.setDate(now.getDate()+days);
+  await setDoc(doc(db,"users",uid),{expiresAt:expires,role:"subscriber",videos:[]},{merge:true});
+  alert("تم تفعيل الاشتراك ✅");
+  loadUsers();
+});
+
+// 🔹 تحميل المستخدمين
+async function loadUsers(){
+  const tbody = document.querySelector("#usersTable tbody");
+  tbody.innerHTML="";
+  const querySnapshot = await getDocs(collection(db,"users"));
+  querySnapshot.forEach(docSnap=>{
+    const data = docSnap.data();
+    const uid = docSnap.id;
+    const expires = data.expiresAt?.toDate();
+    const now = new Date();
+    const diff = Math.ceil((expires-now)/(1000*60*60*24));
+    const status = diff>0?"صالح":"منتهي";
+    const statusClass = diff>0?"status-active":"status-expired";
+
+    let videosHtml = `<div class="video-list">`;
+    if(data.videos) data.videos.forEach(url=>{ 
+      videosHtml+=`<a href="${url}" target="_blank">${url}</a> <button onclick="removeVideo('${uid}','${url}')">❌</button>`; 
+    });
+    videosHtml+=`</div>
+      <input type="text" id="newVideo-${uid}" placeholder="أضف رابط فيديو">
+      <button onclick="addVideo('${uid}')">➕ أضف فيديو</button>`;
+
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${uid}</td>
+      <td>${expires?.toLocaleDateString()}</td>
+      <td>${diff>0?diff:0}</td>
+      <td class="${statusClass}">${status}</td>
+      <td>
+        <button onclick="renewSubscription('${uid}',30)">تجديد 30 يوم</button>
+        <button onclick="expireSubscription('${uid}')">إنهاء الاشتراك</button>
+      </td>
+      <td>${videosHtml}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+// 🔹 تجديد الاشتراك
+window.renewSubscription=async function(uid,days){
+  const now=new Date();
+  const expires=new Date(); expires.setDate(now.getDate()+days);
+  await updateDoc(doc(db,"users",uid),{expiresAt:expires});
+  alert("تم تجديد الاشتراك ✅");
+  loadUsers();
+};
+
+// 🔹 إنهاء الاشتراك
+window.expireSubscription=async function(uid){
+  const now=new Date();
+  await updateDoc(doc(db,"users",uid),{expiresAt:now});
+  alert("تم إنهاء الاشتراك ✅");
+  loadUsers();
+};
+
+// 🔹 إضافة رابط فيديو
+window.addVideo = async function(uid){
+  const input = document.getElementById(`newVideo-${uid}`);
+  const url = input.value.trim();
+  if(!url) return alert("أدخل رابط الفيديو");
+  await updateDoc(doc(db,"users",uid),{videos: arrayUnion(url)});
+  input.value="";
+  loadUsers();
+};
+
+// 🔹 حذف رابط فيديو
+window.removeVideo = async function(uid,url){
+  if(!confirm("هل تريد حذف هذا الفيديو؟")) return;
+  await updateDoc(doc(db,"users",uid),{videos: arrayRemove(url)});
+  loadUsers();
+};
+</script>
+
+</body>
+</html>
